@@ -1,0 +1,20 @@
+Classification,label,regrouping_label,regrouping_int
+1,barrier,object,0
+2,beam,ceiling,1
+3,ceiling,ceiling,1
+4,column,wall,2
+5,door,door,3
+6,fire equipment,clutter,4
+7,fixed object,object,0
+8,floor,floor,5
+9,glass wall,wall,2
+10,light,light,6
+11,mechanical element,clutter,4
+12,moveable object,object,0
+13,noise,clutter,4
+14,other structural element,clutter,4
+15,ramp,clutter,4
+16,stair,stair,2
+17,vegetation,clutter,4
+18,wall,wall,2
+19,window,window,7
