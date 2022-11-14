@@ -43,11 +43,18 @@ def write_to_csv(oa, macc, miou, ious, best_epoch, cfg, write_header=True, area=
 
 
 def generate_data_list(cfg):
+    #print("IN GENERATE DATA LIST")
     if 's3dis' in cfg.dataset.common.NAME.lower():
         raw_root = os.path.join(cfg.dataset.common.data_root, 'raw')
         data_list = sorted(os.listdir(raw_root))
         data_list = [os.path.join(raw_root, item) for item in data_list if
                      'Area_{}'.format(cfg.dataset.common.test_area) in item]
+    elif 'helix' in cfg.dataset.common.NAME.lower():
+        print("i am in helix generate_data_list")
+        raw_root = os.path.join(cfg.dataset.common.data_root, 'raw')
+        data_list = sorted(os.listdir(raw_root))
+        data_list = [os.path.join(raw_root, item) for item in data_list if
+                     '_{}'.format(cfg.dataset.common.test_area) in item]
     elif 'scannet' in cfg.dataset.common.NAME.lower():
         data_list = glob.glob(os.path.join(cfg.dataset.common.data_root, cfg.dataset.test.split, "*.pth"))
     elif 'semantickitti' in cfg.dataset.common.NAME.lower():
@@ -63,11 +70,16 @@ def generate_data_list(cfg):
 
 
 def load_data(data_path, cfg):
+    #print("IN LOAD DATA")
     label, feat = None, None
     if 's3dis' in cfg.dataset.common.NAME.lower():
         data = np.load(data_path)  # xyzrgbl, N*7
         coord, feat, label = data[:, :3], data[:, 3:6], data[:, 6]
         feat = np.clip(feat / 255., 0, 1).astype(np.float32)
+    if 'helix' in cfg.dataset.common.NAME.lower():
+        data = np.load(data_path,allow_pickle=True)  # xyzrgbl, N*7
+        coord, feat, label = data[:, :3], data[:, 3:6], data[:, 6]
+        feat = np.zeros(feat.shape,dtype=np.float32) #clip(feat / 255., 0, 1).astype(np.float32)
     elif 'scannet' in cfg.dataset.common.NAME.lower():
         data = torch.load(data_path)  # xyzrgbl, N*7
         coord, feat = data[0], data[1]
@@ -111,6 +123,9 @@ def load_data(data_path, cfg):
 
 
 def main(gpu, cfg):
+    #print("cfg.dataset.common.NAME.lower()",cfg.dataset.common.NAME.lower())
+    #print("cfg",cfg)
+    #print("gpu",gpu)
     if cfg.distributed:
         if cfg.mp:
             cfg.rank = gpu
@@ -119,7 +134,7 @@ def main(gpu, cfg):
                                 world_size=cfg.world_size,
                                 rank=cfg.rank)
         dist.barrier()
-
+    #print("je suis 1")
     # logger
     setup_logger_dist(cfg.log_path, cfg.rank, name=cfg.dataset.common.NAME)
     if cfg.rank == 0:
@@ -137,7 +152,7 @@ def main(gpu, cfg):
     model_size = cal_model_parm_nums(model)
     logging.info(model)
     logging.info('Number of params: %.4f M' % (model_size / 1e6))
-
+    #print("je suis 2")
     if cfg.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         logging.info('Using Synchronized BatchNorm ...')
@@ -145,12 +160,17 @@ def main(gpu, cfg):
         torch.cuda.set_device(gpu)
         model = nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[cfg.rank], output_device=cfg.rank)
         logging.info('Using Distributed Data parallel ...')
-
+    #print("je suis 3")
     # optimizer & scheduler
     optimizer = build_optimizer_from_cfg(model, lr=cfg.lr, **cfg.optimizer)
     scheduler = build_scheduler_from_cfg(cfg, optimizer)
-
+    #print("je suis 4")
     # build dataset
+    #print("cfg.batch_size",cfg.batch_size)
+    #print("cfg.dataset",cfg.dataset)
+    #print("cfg.dataloader",cfg.dataloader)
+    #print("cfg.datatransforms",cfg.datatransforms)
+    #print("cfg.distributed",cfg.distributed)
     val_loader = build_dataloader_from_cfg(cfg.get('val_batch_size', cfg.batch_size),
                                            cfg.dataset,
                                            cfg.dataloader,
@@ -158,6 +178,7 @@ def main(gpu, cfg):
                                            split='val',
                                            distributed=cfg.distributed
                                            )
+    #print("je suis 5")
     logging.info(f"length of validation dataset: {len(val_loader.dataset)}")
     num_classes = val_loader.dataset.num_classes if hasattr(val_loader.dataset, 'num_classes') else None
     if num_classes is not None:
@@ -166,14 +187,16 @@ def main(gpu, cfg):
     cfg.classes = val_loader.dataset.classes if hasattr(val_loader.dataset, 'classes') else np.arange(num_classes)
     cfg.cmap = np.array(val_loader.dataset.cmap) if hasattr(val_loader.dataset, 'cmap') else None
     validate_fn = validate if 'sphere' not in cfg.dataset.common.NAME.lower() else validate_sphere
-
+    #print("je suis 6")
     # optionally resume from a checkpoint
     model_module = model.module if hasattr(model, 'module') else model
     if cfg.pretrained_path is not None:
         if cfg.mode == 'resume':
+            #print("je suis 7.1")
             resume_checkpoint(cfg, model, optimizer, scheduler, pretrained_path=cfg.pretrained_path)
         else:
             if cfg.mode == 'val':
+                #print("je suis 7.2")
                 best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
                 val_miou, val_macc, val_oa, val_ious, val_accs = validate_fn(model, val_loader, cfg, num_votes=1)
                 with np.printoptions(precision=2, suppress=True):
@@ -182,6 +205,7 @@ def main(gpu, cfg):
                         f'\niou per cls is: {val_ious}')
                 return val_miou
             elif cfg.mode == 'test':
+                #print("je suis 7.3")
                 best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
                 data_list = generate_data_list(cfg)
                 logging.info(f"length of test dataset: {len(data_list)}")
@@ -202,13 +226,17 @@ def main(gpu, cfg):
             else:
                 logging.info(f'Finetuning from {cfg.pretrained_path}')
                 load_checkpoint(model, cfg.pretrained_path, cfg.get('pretrained_module', None))
+                cfg.model.cls_args_helix.in_channels = model.decoder.out_channels
+                model.head = build_model_from_cfg(cfg.model.cls_args_helix)
+                model.to(cfg.rank)
+                print(model)
     else:
         logging.info('Training from scratch')
 
     if 'freeze_blocks' in cfg.mode:
         for p in model_module.encoder.blocks.parameters():
             p.requires_grad = False
-
+    #print("je suis 8")
     train_loader = build_dataloader_from_cfg(cfg.batch_size,
                                              cfg.dataset,
                                              cfg.dataloader,
@@ -217,7 +245,7 @@ def main(gpu, cfg):
                                              distributed=cfg.distributed,
                                              )
     logging.info(f"length of training dataset: {len(train_loader.dataset)}")
-
+    #print("je suis 9")
     cfg.criterion_args.weight = None
     if cfg.get('cls_weighed_loss', False):
         if hasattr(train_loader.dataset, 'num_per_class'):
@@ -225,7 +253,7 @@ def main(gpu, cfg):
         else:
             logging.info('`num_per_class` attribute is not founded in dataset')
     criterion = build_criterion_from_cfg(cfg.criterion_args).cuda()
-
+    #print("je suis 10")
     # ===> start training
     if cfg.use_amp:
         scaler = torch.cuda.amp.GradScaler()
@@ -234,6 +262,7 @@ def main(gpu, cfg):
 
     val_miou, val_macc, val_oa, val_ious, val_accs = 0., 0., 0., [], []
     best_val, macc_when_best, oa_when_best, ious_when_best, best_epoch = 0., 0., 0., [], 0
+    #print("je suis 11")
     for epoch in range(cfg.start_epoch, cfg.epochs + 1):
         if cfg.distributed:
             train_loader.sampler.set_epoch(epoch)
@@ -241,7 +270,7 @@ def main(gpu, cfg):
             train_loader.dataset.epoch = epoch - 1
         train_loss, train_miou, train_macc, train_oa, _, _ = \
             train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler, epoch, cfg)
-
+        #print("je suis 11.1")
         is_best = False
         if epoch % cfg.val_freq == 0:
             val_miou, val_macc, val_oa, val_ious, val_accs = validate_fn(model, val_loader, cfg)
@@ -256,7 +285,7 @@ def main(gpu, cfg):
                     logging.info(
                         f'Find a better ckpt @E{epoch}, val_miou {val_miou:.2f} val_macc {macc_when_best:.2f}, val_oa {oa_when_best:.2f}'
                         f'\nmious: {val_ious}')
-
+        #print("je suis 11.2") 
         lr = optimizer.param_groups[0]['lr']
         logging.info(f'Epoch {epoch} LR {lr:.6f} '
                      f'train_miou {train_miou:.2f}, val_miou {val_miou:.2f}, best val miou {best_val:.2f}')
@@ -280,6 +309,7 @@ def main(gpu, cfg):
                             is_best=is_best
                             )
             is_best = False
+        #print("je suis 11.3")   
     # do not save file to wandb to save wandb space
     # if writer is not None:
     #     Wandb.add_file(os.path.join(cfg.ckpt_dir, f'{cfg.run_name}_ckpt_best.pth'))
