@@ -14,7 +14,7 @@ Classification,label,regrouping_label,regrouping_int
 13,noise,clutter,4
 14,other structural element,clutter,4
 15,ramp,clutter,4
-16,stair,stair,2
+16,stair,stair,7
 17,vegetation,clutter,4
 18,wall,wall,2
-19,window,window,7
+19,window,window,8
